@@ -1,18 +1,17 @@
 import os
 import uuid
 from flask import Flask, render_template_string, request, jsonify, session
-from google.colab import output
 
 # --- КОНФИГУРАЦИЯ ---
-PORT = 5000
 app = Flask(__name__)
-app.secret_key = str(uuid.uuid4())
+# В облаке лучше использовать переменную окружения для ключа, если она есть
+app.secret_key = os.environ.get("SECRET_KEY", str(uuid.uuid4()))
 
-# Структура данных
+# Структура данных (ВНИМАНИЕ: Очищается при перезагрузке сервера на Render)
 users = {}  # { username: { password, avatar } }
 chats = {
     "global": [
-        {"username": "Skyline Bot", "text": "Добро пожаловать в общий чат!", "avatar": "🚀"}
+        {"username": "Skyline Bot", "text": "Добро пожаловать в общий чат на Render!", "avatar": "🚀"}
     ]
 }
 
@@ -25,17 +24,17 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Skyline Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; transition: background-color 0.3s, color 0.3s; height: 100vh; margin: 0; overflow: hidden; }
+        body { font-family: 'Inter', sans-serif; transition: background-color 0.3s; height: 100vh; margin: 0; overflow: hidden; }
         
         .theme-light { background-color: #f8fafc; color: #1e293b; }
         .theme-dark { background-color: #0f172a; color: #f1f5f9; }
         .theme-dark .bg-white { background-color: #1e293b; border-color: #334155; color: white; }
-        .theme-dark .bg-slate-50 { background-color: #0f172a; }
-        .theme-dark .other-message { background-color: #334155; color: white; border: none; }
         .theme-dark .sidebar { background-color: #1e293b; border-right-color: #334155; }
+        .theme-dark .other-message { background-color: #334155; color: white; border: none; }
         .theme-dark .sidebar-item:hover { background-color: #334155; }
+        .theme-dark input { background-color: #1e293b; border-color: #475569; color: white; }
 
         .chat-area { flex-grow: 1; overflow-y: auto; scrollbar-width: thin; }
         .sidebar { width: 260px; flex-shrink: 0; transition: transform 0.3s ease; }
@@ -58,12 +57,11 @@ HTML_TEMPLATE = """
 </head>
 <body class="theme-light">
 
-    <!-- ЭКРАН АВТОРИЗАЦИИ -->
     <div id="auth-screen" class="w-full h-full flex items-center justify-center p-4">
         <div class="w-full max-w-md p-8 bg-white rounded-3xl shadow-2xl border border-slate-100">
             <div class="text-center mb-6">
                 <h1 class="text-3xl font-extrabold tracking-tight text-blue-600">Skyline Chat</h1>
-                <p id="auth-title" class="text-slate-500 mt-2 text-sm">Присоединяйтесь к общению</p>
+                <p id="auth-title" class="text-slate-500 mt-2 text-sm">Версия для Render</p>
             </div>
             <div class="space-y-4">
                 <div id="avatar-selection" class="hidden space-y-2">
@@ -72,47 +70,42 @@ HTML_TEMPLATE = """
                 </div>
                 <input type="text" id="auth-user" placeholder="Имя пользователя" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                 <input type="password" id="auth-pass" placeholder="Пароль" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                <div id="auth-error" class="text-red-500 text-xs hidden text-center"></div>
+                <div id="auth-error" class="text-red-500 text-xs hidden text-center font-medium"></div>
                 <button onclick="handleAuth()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg">Войти</button>
                 <button onclick="toggleAuthMode()" id="toggle-btn" class="w-full text-blue-600 text-xs font-semibold hover:underline">Создать аккаунт</button>
             </div>
         </div>
     </div>
 
-    <!-- ЭКРАН ЧАТА -->
     <div id="chat-screen" class="hidden flex h-full w-full">
-        <!-- Боковая панель -->
         <aside id="sidebar" class="sidebar bg-white border-r border-slate-200 flex flex-col p-4">
             <div class="flex items-center justify-between mb-6">
-                <h3 class="font-bold text-lg text-blue-600">Skyline</h3>
+                <h3 class="font-bold text-lg text-blue-600 tracking-tight">Skyline</h3>
                 <button onclick="toggleSidebar()" class="md:hidden text-slate-400">✕</button>
             </div>
             
             <div class="flex-grow overflow-y-auto">
-                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Ваши чаты</p>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Чаты</p>
                 <div id="chats-list" class="mb-6">
                     <div onclick="switchChat('global')" class="sidebar-item p-3 flex items-center gap-3 bg-blue-50 text-blue-700 font-medium">
-                        <span>🌍</span> <span>Общий чат</span>
+                        <span>🌍</span> <span>Общий</span>
                     </div>
                 </div>
 
-                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Пользователи</p>
-                <div id="users-list">
-                    <!-- Список пользователей -->
-                </div>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">В сети</p>
+                <div id="users-list"></div>
             </div>
 
             <div class="pt-4 border-t border-slate-100 flex items-center gap-2">
-                <button onclick="toggleTheme()" class="flex-1 p-2 bg-slate-100 rounded-lg text-sm">Темы 🌗</button>
-                <button onclick="createNewChat()" class="flex-1 p-2 bg-blue-600 text-white rounded-lg text-sm font-bold">Новый +</button>
+                <button onclick="toggleTheme()" class="flex-1 p-2 bg-slate-100 rounded-lg text-xs">🌓</button>
+                <button onclick="createNewChat()" class="flex-1 p-2 bg-blue-600 text-white rounded-lg text-xs font-bold">Чат +</button>
             </div>
         </aside>
 
-        <!-- Основная область -->
         <main class="flex-grow flex flex-col relative h-full">
             <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center shadow-sm">
                 <div class="flex items-center gap-3">
-                    <button onclick="toggleSidebar()" class="md:hidden p-2 bg-slate-100 rounded-lg mr-1">☰</button>
+                    <button onclick="toggleSidebar()" class="md:hidden p-2 bg-slate-100 rounded-lg">☰</button>
                     <div id="header-avatar" class="w-9 h-9 overflow-hidden rounded-full bg-blue-50 flex items-center justify-center"></div>
                     <div>
                         <h2 class="font-bold text-slate-900 leading-none text-sm" id="display-name">User</h2>
@@ -120,18 +113,16 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="copyInvite()" class="hidden sm:block p-2 text-slate-400 hover:text-blue-600" title="Копировать ссылку">🔗</button>
-                    <button onclick="location.reload()" class="p-2 text-red-400 text-sm font-medium">Выход</button>
+                    <button onclick="copyInvite()" class="hidden sm:block p-2 text-slate-400 hover:text-blue-600">🔗</button>
+                    <button onclick="location.reload()" class="p-2 text-red-400 text-xs font-bold">ВЫХОД</button>
                 </div>
             </header>
 
-            <div id="chat-box" class="chat-area p-4 space-y-4 flex flex-col">
-                <!-- Сообщения -->
-            </div>
+            <div id="chat-box" class="chat-area p-4 space-y-4 flex flex-col"></div>
 
             <footer class="bg-white border-t border-slate-200 p-3">
                 <div class="max-w-4xl mx-auto flex items-center gap-2">
-                    <input type="text" id="msg-input" placeholder="Введите сообщение..." 
+                    <input type="text" id="msg-input" placeholder="Сообщение..." 
                            class="flex-1 p-3 bg-slate-100 border-none rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
                     <button onclick="sendMsg()" class="bg-blue-600 text-white p-3 rounded-2xl shadow-md active:scale-95 transition-transform">
                         ➤
@@ -169,12 +160,17 @@ HTML_TEMPLATE = """
         function createNewChat() {
             const newId = Math.random().toString(36).substring(2, 9);
             const url = window.location.origin + window.location.pathname + "?chat=" + newId;
-            alert("Ссылка на новый чат: " + url);
+            prompt("Ссылка на новый чат (скопируйте):", url);
             window.location.href = url;
         }
 
         function copyInvite() {
-            navigator.clipboard.writeText(window.location.href);
+            const el = document.createElement('textarea');
+            el.value = window.location.href;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
             alert("Ссылка скопирована!");
         }
 
@@ -354,8 +350,6 @@ def send():
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    from google.colab.output import eval_js
-    proxy_url = eval_js(f"google.colab.kernel.proxyPort({PORT})")
-    print(f"Skyline Chat: {proxy_url}")
-    output.serve_kernel_port_as_iframe(PORT, height='800')
-    app.run(port=PORT)
+    # Render передает PORT через переменную окружения
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
